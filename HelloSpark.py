@@ -4,6 +4,8 @@ from pyspark import SparkConf
 from pyspark.sql import *
 from lib.logger import Log4J
 from lib.utils import get_spark_config, load_survey_df, clean_data
+import numpy as np
+import matplotlib.pyplot as plt
 from pyspark.sql import functions
 
 if __name__ == "__main__":
@@ -54,3 +56,36 @@ if __name__ == "__main__":
     # Obtain average session duration of sessions
     pgViewPerSessionDF.createOrReplaceTempView("l_tbl")
     spark.sql("select sum(session_duration)/count(*) from l_tbl")
+
+
+    # Obtain top Referrers
+    allReferrer = spark.sql(
+        "select FIRST_VALUE(refr_urlhost)OVER (  PARTITION BY domain_sessionid  ORDER BY domain_sessionid, collector_tstamp) AS first_refr_urlhost  from year2020tbl where (refr_urlhost is not null or refr_urlhost!='/') ")
+    allReferrer.createOrReplaceTempView("referr_tbl")
+    referDf = spark.sql("select  distinct  first_refr_urlhost from referr_tbl ")
+    referDf = spark.sql(
+        "select  CASE WHEN first_refr_urlhost LIKE '%google%' THEN 'GOOGLE' WHEN first_refr_urlhost LIKE '%facebook%' THEN 'FACEBOOK'  WHEN first_refr_urlhost LIKE '%xyz%' THEN 'XYZ'  WHEN first_refr_urlhost LIKE '%fairfax%' THEN 'FAIRFAX'   WHEN first_refr_urlhost LIKE '%duck%' THEN 'DUCKDUCKGO'   WHEN first_refr_urlhost LIKE '%msn%' THEN 'msn'  WHEN first_refr_urlhost LIKE '%yahoo%' THEN 'yahoo'   WHEN first_refr_urlhost LIKE '%bing%' THEN 'bing'  else 'Others' END AS referrer from referr_tbl ")
+    refer = referDf.groupBy("referrer").count()
+    referPlotDF = refer.orderBy(col("count").desc())
+
+
+    #Obtain the device types used to access the website
+    devicesDF = spark.sql(
+        "select CASE WHEN upper(os_name) LIKE '%IPAD%'THEN 'TABLET' WHEN upper(os_name) LIKE '%TABLET%'THEN 'TABLET' WHEN upper(os_name) LIKE '%WINDOWS%'THEN 'PC'WHEN upper(os_name) LIKE '%MAC%'THEN 'PC' WHEN upper(os_name) LIKE '%IPHONE%'THEN 'MOBILE'WHEN upper(os_name) LIKE '%MOBILE%'THEN 'MOBILE'WHEN upper(os_name) LIKE '%ANDROID%'THEN 'MOBILE' ELSE 'Unknown'END AS devices from year2020tbl order by os_name desc")
+    deviceGroups = devicesDF.groupBy("devices").count()
+    deviceGroupPlotDf = deviceGroups.orderBy(col("count").desc())
+
+
+    # Visualization of data on dashboard
+    DeviceGrpPandas = deviceGroupPlotDf.toPandas()
+    DeviceGrpPandas.plot(x='devices', y='count', kind='bar')
+    plt.title("Users by Devices")
+
+    topRefrPandas = referPlotDF.toPandas()
+    topFiverefPandas = topRefrPandas.head(5)
+
+    topFiverefPandas.plot(x='referrer', y='count', kind='barh')
+    plt.title("Top Referrer")
+
+
+
